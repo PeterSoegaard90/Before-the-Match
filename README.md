@@ -1,1 +1,1 @@
-# CoC_Renegade_Aarhus
+# GTRA_aarhus
