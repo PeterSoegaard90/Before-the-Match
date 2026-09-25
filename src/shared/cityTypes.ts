@@ -120,5 +120,7 @@ export interface CityData {
   parkingHelix: ParkingHelix;
   skybridge: Skybridge;
   sallingRoof: { center: V2; y: number; outer: V2[] };
+  /** Kulissebygninger uden for spilområdet (kun til skylinen). */
+  backdrop: { outer: V2[]; h: number; c: number }[];
   stats: Record<string, number>;
 }

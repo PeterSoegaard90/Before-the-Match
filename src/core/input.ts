@@ -30,7 +30,8 @@ export class Input {
     });
     window.addEventListener('mouseup', (e) => this.mouseHeld.delete(e.button));
     window.addEventListener('mousemove', (e) => {
-      if (document.pointerLockElement === this.el) {
+      // Låst mus: al bevægelse styrer kameraet. Ellers: træk med en museknap nede.
+      if (document.pointerLockElement === this.el || (this.mouseHeld.size > 0 && e.target === this.el)) {
         this.mouseDX += e.movementX;
         this.mouseDY += e.movementY;
       }

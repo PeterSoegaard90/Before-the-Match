@@ -8,7 +8,7 @@ import { BeerSystem, makeBeerCart, type Beer } from '../entities/beers.ts';
 import { NpcManager, type Agent, type Bubble } from '../entities/npcs.ts';
 import { Player } from '../entities/player.ts';
 import { VehicleManager, makePoliceBike, type Vehicle } from '../entities/vehicles.ts';
-import { Physics } from '../physics.ts';
+import { Physics, RAPIER } from '../physics.ts';
 import type { CityData } from '../shared/cityTypes.ts';
 import { rng } from '../shared/geom.ts';
 import { UI } from '../ui/ui.ts';
@@ -17,6 +17,7 @@ import { Fanzone } from '../world/fanzone.ts';
 import { WATER_Y } from '../world/water.ts';
 import { World } from '../world/world.ts';
 import { ThirdPersonCamera, type CamMode } from './camera.ts';
+import { FIRST_ROUND_HINTS, RouteFinder } from './guidance.ts';
 import { FANZONE_NAMES, Round, Wanted, formatPoints } from './rules.ts';
 
 export type GameState = 'loading' | 'menu' | 'select' | 'countdown' | 'playing' | 'paused' | 'map' | 'ended';
@@ -63,18 +64,40 @@ export class Game {
   private minimapAcc = 0;
   private drumBpm = 0;
   private readonly clock = new THREE.Clock();
+  private routeFinder!: RouteFinder;
+  private roundsStarted = 0;
+  private hintIdx = 0;
+  private hintUntil = -1;
   readonly testMode: boolean;
+  private qAA = true;
+  private qPixelRatio: number | null = null;
+  private qShadow: number | null = null;
+  private qFixedQuality = false;
+  private qPcfSoft = true;
+  /** ?view=x,y,z,tx,ty,tz (kun test): fast kamera i menuen til skærmbilleder. */
+  private fixedView: number[] | null = null;
 
   constructor(canvas: HTMLCanvasElement, uiRoot: HTMLElement) {
-    this.testMode = new URLSearchParams(location.search).has('test');
-    this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
-    this.pixelRatio = Math.min(window.devicePixelRatio || 1, 1.5);
+    const qs = new URLSearchParams(location.search);
+    this.testMode = qs.has('test');
+    this.qAA = !(this.testMode && qs.get('aa') === '0');
+    this.qPixelRatio = this.testMode && qs.get('pr') ? +qs.get('pr')! : null;
+    this.qShadow = this.testMode && qs.get('shadow') ? +qs.get('shadow')! : null;
+    this.qFixedQuality = this.testMode && qs.has('fixedq');
+    this.qPcfSoft = !(this.testMode && qs.get('pcf') === '0');
+    const view = qs.get('view')?.split(',').map(Number);
+    if (this.testMode && view && view.length === 6 && view.every(Number.isFinite)) this.fixedView = view;
+    if (this.testMode && qs.has('noui')) uiRoot.style.display = 'none';
+    this.renderer = new THREE.WebGLRenderer({ canvas, antialias: this.qAA, powerPreference: 'high-performance' });
+    this.pixelRatio = this.qPixelRatio ?? Math.min(window.devicePixelRatio || 1, 1);
     this.renderer.setPixelRatio(this.pixelRatio);
     this.renderer.setSize(window.innerWidth, window.innerHeight);
     this.renderer.shadowMap.enabled = true;
-    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    this.renderer.shadowMap.type = this.qPcfSoft ? THREE.PCFSoftShadowMap : THREE.PCFShadowMap;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.05;
+    // Dithering giver kun støj i software-rendering; slå det fra
+    this.renderer.getContext().disable(this.renderer.getContext().DITHER);
     this.camera = new THREE.PerspectiveCamera(66, window.innerWidth / window.innerHeight, 0.3, 2600);
     this.input = new Input(canvas);
     this.settings = loadSettings();
@@ -119,8 +142,9 @@ export class Game {
     ]);
     this.physics = physics;
     await step(0.3, 'Bygger 1.600 huse, Domkirken og ARoS …');
-    this.world = new World(city, physics, this.scene);
+    this.world = new World(city, physics, this.scene, { shadowSize: this.qShadow ?? 2048 });
     this.cam = new ThirdPersonCamera(this.camera, physics);
+    this.routeFinder = new RouteFinder(this.world.nav);
     await step(0.55, 'Parkerer biler og låser cykler (ikke så godt) …');
     this.vehicles = new VehicleManager(physics);
     this.scene.add(this.vehicles.group);
@@ -157,7 +181,7 @@ export class Game {
     // Varm skyggerne/shaderne op
     this.renderer.compile(this.scene, this.camera);
     await step(1, 'Klar!');
-    if (this.testMode) (window as unknown as { __btm: Game }).__btm = this;
+    if (this.testMode) Object.assign(window as object, { __btm: this, __RAPIER: RAPIER, __audio: audio });
     this.toMenu();
     this.renderer.setAnimationLoop(() => this.frame());
   }
@@ -221,6 +245,10 @@ export class Game {
 
   private startRound() {
     this.state = 'playing';
+    this.roundsStarted++;
+    this.hintIdx = this.roundsStarted === 1 ? 0 : FIRST_ROUND_HINTS.length;
+    this.hintUntil = -1;
+    this.routeFinder.reset();
     this.ui.show('hud');
     audio.kickoffWhistle();
     this.ui.banner('Afsted!', 'Find fadøl – og nå fanzonen inden kickoff', '#ffffff', 2.2);
@@ -261,7 +289,7 @@ export class Game {
     const h = Math.min(window.innerHeight * 0.78, (window.innerWidth * 0.92) / aspect);
     cv.width = Math.round(h * aspect);
     cv.height = Math.round(h);
-    this.map.drawBig(cv, this.player.pos.x, this.player.pos.z, this.player.yaw, this.mapDots(true), this.round.revealed && this.fanzone ? { x: this.fanzone.center.x, z: this.fanzone.center.z } : null);
+    this.map.drawBig(cv, this.player.pos.x, this.player.pos.z, this.player.yaw, this.mapDots(true), this.round.revealed && this.fanzone ? { x: this.fanzone.center.x, z: this.fanzone.center.z } : null, this.round.revealed ? this.routeFinder.route : null);
     this.input.exitLock();
   }
 
@@ -378,8 +406,21 @@ export class Game {
   }
 
   // ------------------------------------------------------------ spilløkke
+  /** Glidende gennemsnit af CPU-tid til spillogik pr. frame (ms). */
+  cpuMs = 0;
+  /** Glidende gennemsnit pr. sektion (ms) – kun i testtilstand. */
+  readonly prof: Record<string, number> = {};
+  private profT = 0;
+  private mark(label: string) {
+    if (!this.testMode) return;
+    const t = performance.now();
+    if (label !== 'start') this.prof[label] = (this.prof[label] ?? 0) + (t - this.profT - (this.prof[label] ?? 0)) * 0.05;
+    this.profT = t;
+  }
+
   private frame() {
     const raw = this.clock.getDelta();
+    const tCpu = performance.now();
     this.trackFps(raw);
     // Lange frames deles i fysiktrin á højst 1/30 s, så tiden går i realtid selv ved lav fps
     let remaining = Math.min(this.testMode ? 0.25 : 0.1, raw);
@@ -397,15 +438,29 @@ export class Game {
       }
       this.input.endFrame();
     } while (remaining > 1e-4);
+    this.cpuMs += (performance.now() - tCpu - this.cpuMs) * 0.05;
     this.renderer.render(this.scene, this.camera);
   }
 
   private updateMenu(dt: number) {
     // Langsom flyvetur rundt om Domkirken
-    this.menuAngle += dt * 0.06;
+    this.menuAngle += dt * 0.05;
     const c = this.world.square('storeTorv');
-    this.camera.position.set(c.x + Math.cos(this.menuAngle) * 170, 70, c.z + Math.sin(this.menuAngle) * 170);
-    this.camera.lookAt(c.x + 60, 25, c.z);
+    if (this.fixedView) {
+      const [x, y, z, tx, ty, tz] = this.fixedView;
+      this.camera.position.set(x, y, z);
+      this.camera.lookAt(tx, ty, tz);
+      const f = new THREE.Vector3(tx, 0, tz);
+      this.world.update(dt, f, this.camera);
+      this.npcs.update(dt, this.realTime, { pos: f, onFoot: false, speed: 0, vehicleKind: 'car', immune: true }, this.camera.position, 0, f);
+      this.beers.update(dt, this.realTime);
+      this.physics.step(dt);
+      this.vehicles.update(dt, this.camera.position);
+      return;
+    }
+    const a = this.menuAngle + 2.2;
+    this.camera.position.set(c.x + 40 + Math.cos(a) * 290, 105, c.z + 60 + Math.sin(a) * 290);
+    this.camera.lookAt(c.x + 40, 10, c.z + 60);
     this.world.update(dt, c, this.camera);
     this.npcs.update(dt, this.realTime, { pos: c, onFoot: false, speed: 0, vehicleKind: 'car', immune: true }, this.camera.position, 0, c);
     this.beers.update(dt, this.realTime);
@@ -473,9 +528,21 @@ export class Game {
   }
 
   private updatePlaying(dt: number) {
+    this.mark('start');
     this.now += dt;
     const inp = this.input;
-    if (inp.locked || this.testMode) this.cam.look(inp.mouseDX, inp.mouseDY, this.settings.sensitivity, this.settings.invertY);
+    this.cam.look(inp.mouseDX, inp.mouseDY, this.settings.sensitivity, this.settings.invertY);
+    // Tips i første runde
+    const elapsed = RULES.roundSeconds - this.round.timeLeft;
+    if (this.hintIdx < FIRST_ROUND_HINTS.length && elapsed >= FIRST_ROUND_HINTS[this.hintIdx].at) {
+      this.ui.hint(FIRST_ROUND_HINTS[this.hintIdx].text, Infinity);
+      this.hintUntil = this.now + 7;
+      this.hintIdx++;
+    }
+    if (this.hintUntil > 0 && this.now > this.hintUntil) {
+      this.ui.hint(null);
+      this.hintUntil = -1;
+    }
     this.hitImmune = Math.max(0, this.hitImmune - dt);
     const p = this.player;
 
@@ -507,7 +574,9 @@ export class Game {
       p.teleport(sp.pos[0], 0, sp.pos[1]);
     }
 
+    this.mark('player');
     this.physics.step(dt);
+    this.mark('physics');
 
     // --- fadøl
     const radius = p.vehicle ? p.vehicle.spec.pickupRadius : 1.35;
@@ -515,7 +584,9 @@ export class Game {
     if (b) this.onBeer(b);
 
     // --- NPC'er og politi
+    this.mark('beers');
     this.npcs.update(dt, this.now, this.playerInfo(), this.camera.position, this.wanted.stars, this.lastSeenPos);
+    this.mark('npcs');
     this.seenTimer -= dt;
     if (this.seenTimer <= 0) {
       this.seenTimer = 0.25;
@@ -540,12 +611,16 @@ export class Game {
     }
     this.fanzone?.update(dt, this.camera.position);
 
+    this.mark('rules');
     // --- visuelt
     this.vehicles.update(dt, this.camera.position);
+    this.mark('vehicles');
     this.beers.update(dt, this.now);
+    this.mark('beervis');
     const mode: CamMode = p.vehicle ? (p.vehicle.kind === 'car' ? 'car' : 'bike') : 'foot';
     this.cam.update(dt, p.vehicle ? p.vehicle.pos : p.pos, mode, p.vehicle ? p.vehicle.yaw : null, p.horizontalSpeed);
     this.world.update(dt, p.pos, this.camera);
+    this.mark('world');
 
     // --- lyd
     const crowd = this.fanzone ? Math.max(0, 1 - this.fanzone.center.distanceTo(p.pos) / 120) : 0;
@@ -554,7 +629,9 @@ export class Game {
     if (bpm !== this.drumBpm) { audio.setDrums(0); audio.setDrums(bpm); this.drumBpm = bpm; }
     if (this.state !== 'playing') { audio.setDrums(0); this.drumBpm = 0; }
 
+    this.mark('audio');
     this.drawHud(dt);
+    this.mark('hud');
   }
 
   private updateOnFoot(dt: number) {
@@ -854,7 +931,8 @@ export class Game {
     this.minimapAcc += dt;
     if (this.minimapAcc > 1 / 30) {
       this.minimapAcc = 0;
-      this.map.drawMini(this.ui.minimapCanvas, p.pos.x, p.pos.z, this.cam.yaw, p.yaw, this.mapDots(false), fz ? { x: fz.x, z: fz.z } : null);
+      const route = fz && this.state === 'playing' ? this.routeFinder.update(this.now, [p.pos.x, p.pos.z], [fz.x, fz.z]) : null;
+      this.map.drawMini(this.ui.minimapCanvas, p.pos.x, p.pos.z, this.cam.yaw, p.yaw, this.mapDots(false), fz ? { x: fz.x, z: fz.z } : null, route);
     }
     // bobler og barnavne
     const items: { key: string; kind: 'bubble' | 'label'; text: string; x: number; y: number }[] = [];
@@ -881,6 +959,7 @@ export class Game {
 
   // ------------------------------------------------------------ ydelse
   private trackFps(dt: number) {
+    if (this.qFixedQuality) return;
     if (this.state !== 'playing' && this.state !== 'menu') return;
     this.fps.acc += dt;
     this.fps.frames++;
@@ -888,12 +967,25 @@ export class Game {
     const fps = this.fps.frames / this.fps.acc;
     this.fps.acc = 0;
     this.fps.frames = 0;
-    if (fps < 48 && this.pixelRatio > 0.75) {
-      this.pixelRatio = Math.max(0.75, this.pixelRatio - 0.25);
-      this.renderer.setPixelRatio(this.pixelRatio);
+    if (fps < 50) {
+      // Trin for trin: bløde skygger → skarpe, opløsning ned, mindre skyggekort
       this.fps.good = 0;
-    } else if (fps < 40 && this.world.sky.sun.shadow.mapSize.x > 1024) {
-      this.world.sky.setShadowQuality(1024);
+      if (this.renderer.shadowMap.type === THREE.PCFSoftShadowMap) {
+        this.renderer.shadowMap.type = THREE.PCFShadowMap;
+        this.scene.traverse((o) => {
+          const m = (o as THREE.Mesh).material as THREE.Material | THREE.Material[] | undefined;
+          if (Array.isArray(m)) m.forEach((x) => (x.needsUpdate = true));
+          else if (m) m.needsUpdate = true;
+        });
+      } else if (this.pixelRatio > 0.85) {
+        this.pixelRatio = Math.max(0.85, this.pixelRatio - 0.15);
+        this.renderer.setPixelRatio(this.pixelRatio);
+      } else if (this.world.sky.sun.shadow.mapSize.x > 1024) {
+        this.world.sky.setShadowQuality(1024);
+      } else if (this.pixelRatio > 0.7) {
+        this.pixelRatio = Math.max(0.7, this.pixelRatio - 0.15);
+        this.renderer.setPixelRatio(this.pixelRatio);
+      }
     } else if (fps > 58) {
       this.fps.good++;
       const max = Math.min(window.devicePixelRatio || 1, 1.5);
@@ -913,7 +1005,7 @@ export class Game {
       beers: this.round.beers, points: this.round.points, stars: this.wanted.stars, timeLeft: this.round.timeLeft,
       revealed: this.round.revealed, fanzone: this.round.fanzone, outcome: this.round.outcome, pixelRatio: this.pixelRatio,
       calls: this.renderer.info.render.calls, triangles: this.renderer.info.render.triangles,
-      peds: this.npcs.peds.length, hools: this.npcs.hools.length, cops: this.npcs.cops.length, vehicles: this.vehicles.list.length,
+      peds: this.npcs.peds.length, hools: this.npcs.hools.length, cops: this.npcs.cops.length, vehicles: this.vehicles.list.length, cpuMs: this.cpuMs,
     };
   }
 }

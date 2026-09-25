@@ -245,7 +245,7 @@ export class Player {
     const top = feet + TUNING.mantleMax + 0.4;
     const filter = G.STATIC | G.VEHICLE | G.PROP;
     // Plads over hovedet til at komme op?
-    for (const d of [0.55, 0.8, 1.05]) {
+    for (const d of [0.5, 0.75, 1.0, 1.3]) {
       const ox = this.pos.x + fx * d, oz = this.pos.z + fz * d;
       const hit = this.physics.ray(ox, top, oz, 0, -1, 0, top - (feet + TUNING.mantleMin) + 0.05, filter);
       if (!hit || hit.normal.y < 0.7) continue;

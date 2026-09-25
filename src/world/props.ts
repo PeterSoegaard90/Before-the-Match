@@ -241,15 +241,16 @@ function buildPlatform(site: PlatformSite, gb: GeoBuilder, physics: Physics, R: 
     return new THREE.Vector3(bx, 2.6, bz);
   }
   if (site.kind === 'scaffold') {
-    for (const x of [-4, 0, 4]) for (const d of [0.25, 1.45]) deco(x, 3.6, d, 0.05, 3.6, 0.05, tube);
-    for (const d of [0.25, 1.45]) for (const y of [1.0, 3.0, 5.0, 7.0]) deco(0, y, d, 4, 0.04, 0.04, tube);
-    solid(0, 1.95, 0.85, 4, 0.06, 0.62, plank); // niveau 1: hele bredden (2.0 m)
-    solid(-2, 3.95, 0.85, 2, 0.06, 0.62, plank); // niveau 2: venstre halvdel (4.0 m)
-    solid(2, 5.95, 0.85, 2, 0.06, 0.62, plank); // niveau 3: højre halvdel (6.0 m)
+    for (const x of [-4, 0, 4]) for (const d of [0.25, 1.45]) deco(x, 3.9, d, 0.05, 3.9, 0.05, tube);
+    for (const d of [0.25, 1.45]) for (const y of [1.0, 3.2, 5.4, 7.6]) deco(0, y, d, 4, 0.04, 0.04, tube);
+    // Forskudte etager (2,2 m imellem), så man kan trække sig op fra den ene til den næste
+    solid(0, 1.95, 0.85, 4, 0.06, 0.62, plank); // niveau 1: hele bredden (2,0 m)
+    solid(-2, 4.15, 0.85, 2, 0.06, 0.62, plank); // niveau 2: venstre halvdel (4,2 m)
+    solid(2, 6.35, 0.85, 2, 0.06, 0.62, plank); // niveau 3: højre halvdel (6,4 m)
     // net-/dug-banner på facaden for farve
-    deco(0, 4.5, 0.06, 4, 2.5, 0.02, color('#d8d2c2'));
+    deco(0, 4.6, 0.06, 4, 2.6, 0.02, color('#d8d2c2'));
     const [bx, bz] = at(2.4, 0.85);
-    return new THREE.Vector3(bx, 6.0, bz);
+    return new THREE.Vector3(bx, 6.41, bz);
   }
   // Halvtag med kasser at klatre op ad
   const awn = color(R() < 0.5 ? '#2f6b3f' : '#8e2b2b');

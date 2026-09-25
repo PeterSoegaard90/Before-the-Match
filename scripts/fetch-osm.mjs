@@ -1,5 +1,5 @@
 // Henter rå OpenStreetMap-data for spilområdet (Aarhus Midtby) via Overpass API.
-// Kør: npm run data:fetch  → data/osm-raw.json
+// Kør: npm run data:fetch  → data/osm-raw.json + data/osm-backdrop.json
 // Data © OpenStreetMap contributors, ODbL.
 import { writeFile, mkdir } from 'node:fs/promises';
 import { BBOX } from './area.ts';
@@ -32,11 +32,15 @@ const query = `[out:json][timeout:180];
 );
 out geom;`;
 
-async function main() {
+// Kulisse: bygninger i en ring uden om spilområdet (skyline, ingen kollision)
+const bb = `${BBOX.south - 0.0055},${BBOX.west - 0.0095},${BBOX.north + 0.0055},${BBOX.east + 0.0095}`;
+const backdropQuery = `[out:json][timeout:180];(way["building"](${bb}););out geom;`;
+
+async function fetchTo(q, file) {
   let lastErr;
   for (const url of MIRRORS) {
     try {
-      console.log(`Henter fra ${url} …`);
+      console.log(`Henter ${file} fra ${url} …`);
       const res = await fetch(url, {
         method: 'POST',
         headers: {
@@ -44,13 +48,13 @@ async function main() {
           'Accept': 'application/json',
           'User-Agent': 'BeforeTheMatch-game-datapipeline/0.1',
         },
-        body: 'data=' + encodeURIComponent(query),
+        body: 'data=' + encodeURIComponent(q),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const json = await res.json();
       await mkdir('data', { recursive: true });
-      await writeFile('data/osm-raw.json', JSON.stringify(json));
-      console.log(`OK: ${json.elements.length} elementer → data/osm-raw.json`);
+      await writeFile(file, JSON.stringify(json));
+      console.log(`OK: ${json.elements.length} elementer → ${file}`);
       return;
     } catch (e) {
       console.warn(`  fejlede: ${e.message}`);
@@ -58,6 +62,11 @@ async function main() {
     }
   }
   throw lastErr;
+}
+
+async function main() {
+  await fetchTo(query, 'data/osm-raw.json');
+  await fetchTo(backdropQuery, 'data/osm-backdrop.json');
 }
 
 main().catch((e) => {

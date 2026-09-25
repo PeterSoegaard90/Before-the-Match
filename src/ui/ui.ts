@@ -30,8 +30,9 @@ export class UI {
   private hudEls!: {
     time: HTMLElement; timer: HTMLElement; fz: HTMLElement; beers: HTMLElement; beerBox: HTMLElement; points: HTMLElement; stars: HTMLElement;
     feed: HTMLElement; prompt: HTMLElement; progress: HTMLElement; progressBar: HTMLElement; banner: HTMLElement; minimap: HTMLCanvasElement; lockhint: HTMLElement;
-    layer: HTMLElement; marker: HTMLElement;
+    layer: HTMLElement; marker: HTMLElement; hint: HTMLElement;
   };
+  private hintTimer = 0;
   private lastStars = -1;
   private lastBeers = -1;
   private bannerTimer = 0;
@@ -112,9 +113,10 @@ export class UI {
         <div class="marker3d hidden" id="marker">${FLAG_SVG}<div class="outline-sm">FANZONE</div><div class="dist" id="markerdist"></div></div>
         <div class="banner" id="banner"></div>
         <div class="progress hidden" id="progress"><i id="progressbar"></i></div>
+        <div class="hint hidden" id="hint" role="status"></div>
         <div class="prompt hidden" id="prompt"></div>
         <div class="minimap"><canvas id="minimap" width="196" height="196"></canvas></div>
-        <div class="lockhint hidden interactive" id="lockhint">Klik for at styre kameraet med musen</div>
+        <div class="lockhint hidden interactive" id="lockhint">Klik for at styre kameraet med musen (eller træk med musen)</div>
       </div>`, 'screen');
     hud.style.pointerEvents = 'none';
     hud.style.display = '';
@@ -122,7 +124,7 @@ export class UI {
     this.hudEls = {
       time: q('time'), timer: hud.querySelector('.timer') as HTMLElement, fz: q('fz'), beers: q('beers'), beerBox: q('beerbox'), points: q('points'), stars: q('stars'),
       feed: q('feed'), prompt: q('prompt'), progress: q('progress'), progressBar: q('progressbar'), banner: q('banner'),
-      minimap: q('minimap') as HTMLCanvasElement, lockhint: q('lockhint'), layer: q('layer'), marker: q('marker'),
+      minimap: q('minimap') as HTMLCanvasElement, lockhint: q('lockhint'), layer: q('layer'), marker: q('marker'), hint: q('hint'),
     };
 
     const pause = this.add('pause', `
@@ -303,13 +305,26 @@ export class UI {
   }
 
   // ------------------------------------------------------------ HUD
+  private hudCache = new Map<HTMLElement, string>();
+  private setText(el: HTMLElement, text: string) {
+    if (this.hudCache.get(el) === text) return;
+    this.hudCache.set(el, text);
+    el.textContent = text;
+  }
+  private setFlag(el: HTMLElement, cls: string, on: boolean) {
+    const key = '§' + cls + on;
+    if (this.hudCache.get(el) === key) return;
+    this.hudCache.set(el, key);
+    el.classList.toggle(cls, on);
+  }
+
   updateHud(s: { timeLeft: number; beers: number; points: number; stars: number; fanzone: string | null; fanzoneDist: number | null; locked: boolean; playing: boolean }) {
     const h = this.hudEls;
-    h.time.textContent = formatTime(s.timeLeft);
-    h.timer.classList.toggle('urgent', s.timeLeft <= 60);
+    this.setText(h.time, formatTime(s.timeLeft));
+    this.setFlag(h.timer, 'urgent', s.timeLeft <= 60);
     if (s.fanzone) {
       h.fz.classList.remove('hidden');
-      h.fz.textContent = `Fanzone: ${s.fanzone}${s.fanzoneDist !== null ? ` · ${Math.round(s.fanzoneDist)} m` : ''}`;
+      this.setText(h.fz, `Fanzone: ${s.fanzone}${s.fanzoneDist !== null ? ` · ${Math.round(s.fanzoneDist / 5) * 5} m` : ''}`);
     } else h.fz.classList.add('hidden');
     if (s.beers !== this.lastBeers) {
       h.beers.textContent = String(s.beers);
@@ -320,21 +335,23 @@ export class UI {
       }
       this.lastBeers = s.beers;
     }
-    h.points.textContent = `${formatPoints(s.points)} point`;
+    this.setText(h.points, `${formatPoints(s.points)} point`);
     if (s.stars !== this.lastStars) {
       h.stars.innerHTML = [0, 1, 2].map((i) => STAR_SVG(i < s.stars)).join('');
       h.stars.setAttribute('aria-label', `Efterlyst: ${s.stars} af 3 stjerner`);
       this.lastStars = s.stars;
     }
-    h.lockhint.classList.toggle('hidden', s.locked || !s.playing);
+    this.setFlag(h.lockhint, 'hidden', s.locked || !s.playing);
   }
 
   resetHud() {
     this.lastBeers = -1;
     this.lastStars = -1;
+    this.hudCache.clear();
     this.hudEls.feed.innerHTML = '';
     this.hudEls.banner.innerHTML = '';
     this.hudEls.layer.innerHTML = '';
+    this.hint(null);
   }
 
   prompt(text: string | null) {
@@ -342,6 +359,18 @@ export class UI {
     if (!text) { p.classList.add('hidden'); return; }
     p.innerHTML = text;
     p.classList.remove('hidden');
+  }
+
+  hint(html: string | null, secs = 7) {
+    const h = this.hudEls.hint;
+    clearTimeout(this.hintTimer);
+    if (!html) { h.classList.add('hidden'); return; }
+    h.innerHTML = `<span class="hint-tag">TIP</span>${html}`;
+    h.classList.remove('hidden');
+    h.classList.remove('show');
+    void h.offsetWidth;
+    h.classList.add('show');
+    if (Number.isFinite(secs)) this.hintTimer = window.setTimeout(() => h.classList.add('hidden'), secs * 1000);
   }
 
   progress(frac: number | null) {

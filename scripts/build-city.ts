@@ -1,7 +1,7 @@
 // Omsætter rå OSM-data (data/osm-raw.json) til spillets bydata (public/data/city.json).
 // Kør: npm run data:build
 // Kortdata © OpenStreetMap contributors (ODbL).
-import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { BBOX, project } from './area.ts';
 import type {
   Area, AreaKind, BarSpot, Building, Canopy, CityData, HeightSource, LandmarkId, NavGraph,
@@ -702,6 +702,25 @@ const cartRoutes: V2[][] = [];
   }
 }
 
+// ---------------------------------------------------------------- kulisse (skyline uden for området)
+const backdrop: CityData['backdrop'] = [];
+if (existsSync('data/osm-backdrop.json')) {
+  const bd = JSON.parse(readFileSync('data/osm-backdrop.json', 'utf8')) as { elements: OsmEl[] };
+  for (const e of bd.elements) {
+    if (e.type !== 'way' || !e.geometry || !e.tags?.building) continue;
+    const t = e.tags;
+    if (t.location === 'underground' || t.building === 'roof') continue;
+    const ring = cleanRing(P(e.geometry), 0.6);
+    if (ring.length < 3) continue;
+    const area = Math.abs(signedArea(ring));
+    if (area < 30) continue;
+    const c = centroid(ring);
+    if (inBounds(c, 45)) continue;
+    const h = num(t.height) ?? (num(t['building:levels']) !== undefined ? num(t['building:levels'])! * 3.1 + 0.6 : (area < 80 ? 2 : 3 + Math.floor(hash(e.id) * 3)) * 3.1 + 0.6);
+    backdrop.push({ outer: withWinding(ring, true).map((p) => [Math.round(p[0]), Math.round(p[1])] as V2), h: Math.round(h), c: Math.floor(hash(e.id * 3) * 12) });
+  }
+}
+
 // ---------------------------------------------------------------- output
 const stats: Record<string, number> = {
   buildings: buildings.length,
@@ -717,6 +736,7 @@ const stats: Record<string, number> = {
   navNodes: navNodes.length,
   navEdges: navEdges.length,
   cartRoutes: cartRoutes.length,
+  backdrop: backdrop.length,
 };
 for (const s of ['osm-height', 'osm-levels', 'neighbors', 'default', 'landmark'] as HeightSource[])
   stats['height_' + s] = buildings.filter((b) => b.heightSource === s).length;
@@ -746,6 +766,7 @@ const out: CityData = {
   parkingHelix,
   skybridge,
   sallingRoof,
+  backdrop,
   stats,
 };
 mkdirSync('public/data', { recursive: true });

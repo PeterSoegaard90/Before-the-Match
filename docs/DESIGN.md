@@ -58,5 +58,16 @@ Et 3D-spil i tredjeperson i browseren. Du er en dansk roligan med 5 minutter til
 4. Kreditskærmen skriver "© OpenStreetMap contributors".
 5. At køre en hooligan ned giver ingen stjerne (selvforsvar); at køre en betjent ned gør.
 
+## Tilføjet under kvalitetsrunden
+- **GPS-rute**: når fanzonen åbner, tegnes den korteste vej (A* på gangnettet) på minikortet og det store kort.
+- **Tips i første runde**: korte hjælpetekster om lysstråler, køretøjer, platforme, hooligans og kortet.
+- **Kamera uden musefangst**: kan også styres ved at trække med musen, hvis browseren ikke tillader pointer lock.
+- **Kulisse-skyline**: bygninger i en ring på ca. 600 m uden om spilområdet (fra OSM), så horisonten ikke slutter brat.
+
+## Ydelse (målt på Intel Core Ultra 7 255U med indbygget Intel-grafik, 1920×1080)
+- Fuld kvalitet (MSAA, bløde skygger, 2048-skyggekort, opløsning 1,0): **ca. 138 fps** i gennemsnit, 95-percentil 10,7 ms.
+- Spillogik ca. 2,4 ms pr. frame. Statiske kollidere samles i trimesh-fliser (fysiktrin ≈ 0,3 ms i stedet for 7,8 ms).
+- Adaptiv kvalitet sænker trinvis skyggeblødhed, opløsning og skyggekort, hvis fps falder under 50.
+
 ## Mangler (afhænger af brugeren)
 - **BBR-højder**: kræver en gratis bruger på Datafordeleren. Indtil da bruges OSM-højder + naboernes etageantal + 4 etager som standard.

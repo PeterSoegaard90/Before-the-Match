@@ -76,7 +76,10 @@ export function buildGround(city: CityData, physics: Physics): THREE.Group {
   ground.receiveShadow = true;
   ground.matrixAutoUpdate = false;
   group.add(ground);
-  physics.addBox(0, -0.5, 0, 1500, 0.5, 1500);
+  // Jorden som fliser á 100 × 100 m: én kæmpe kasse giver numerisk upræcision (figurer synker ned)
+  const b = city.bounds;
+  for (let x = Math.floor(b.minX / 100) * 100 - 100; x < b.maxX + 100; x += 100)
+    for (let z = Math.floor(b.minZ / 100) * 100 - 100; z < b.maxZ + 100; z += 100) physics.addBox(x + 50, -0.5, z + 50, 50, 0.5, 50);
 
   // Arealer
   const areaGb = new GeoBuilder();

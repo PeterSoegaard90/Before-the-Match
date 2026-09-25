@@ -8,6 +8,7 @@ export class AudioEngine {
   private master!: GainNode;
   private sfx!: GainNode;
   private noiseBuf!: AudioBuffer;
+  private analyser: AnalyserNode | null = null;
   private volume = 0.8;
   private engine: { osc1: OscillatorNode; osc2: OscillatorNode; filter: BiquadFilterNode; gain: GainNode } | null = null;
   private skid: { src: AudioBufferSourceNode; gain: GainNode; filter: BiquadFilterNode } | null = null;
@@ -37,6 +38,9 @@ export class AudioEngine {
       comp.threshold.value = -14;
       comp.ratio.value = 4;
       this.master.connect(comp).connect(ctx.destination);
+      this.analyser = ctx.createAnalyser();
+      this.analyser.fftSize = 1024;
+      comp.connect(this.analyser);
       this.sfx = ctx.createGain();
       this.sfx.connect(this.master);
       const len = ctx.sampleRate * 2;
@@ -45,6 +49,20 @@ export class AudioEngine {
       for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
     }
     if (this.ctx.state === 'suspended') void this.ctx.resume();
+  }
+
+  /** Aktuelt lydniveau (RMS 0–1) – bruges af tests til at bekræfte, at der kommer lyd. */
+  level(): number {
+    if (!this.analyser) return 0;
+    const buf = new Float32Array(this.analyser.fftSize);
+    this.analyser.getFloatTimeDomainData(buf);
+    let s = 0;
+    for (const v of buf) s += v * v;
+    return Math.sqrt(s / buf.length);
+  }
+
+  get state(): string {
+    return this.ctx?.state ?? 'none';
   }
 
   setVolume(v: number) {

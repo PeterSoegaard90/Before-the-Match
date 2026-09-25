@@ -331,11 +331,13 @@ export class Vehicle {
     const mv = this.kcc.computedMovement();
     if (this.kcc.computedGrounded()) this.vy = Math.max(this.vy, -1);
     let impact = 0;
+    let wallHit = false;
     for (let i = 0; i < this.kcc.numComputedCollisions(); i++) {
       const c = this.kcc.computedCollision(i);
       if (!c) continue;
       const n = c.normal1;
       if (Math.abs(n.y) > 0.6) continue;
+      wallHit = true;
       const nl = Math.hypot(n.x, n.z) || 1;
       const nx = n.x / nl, nz = n.z / nl;
       const into = this.vel.x * nx + this.vel.z * nz;
@@ -357,8 +359,8 @@ export class Vehicle {
     this.body.setNextKinematicTranslation(nt);
     this.body.setNextKinematicRotation(quatYawPitch(this.yaw));
     this.pos.set(nt.x, nt.y - this.spec.rideHeight, nt.z);
-    // faktisk hastighed (fx når man kører ind i noget)
-    if (dt > 0) {
+    // faktisk hastighed – kun når man rammer en væg (ikke ved ujævnheder i underlaget)
+    if (dt > 0 && wallHit) {
       const ax = mv.x / dt, az = mv.z / dt;
       if (Math.hypot(ax, az) < this.speed * 0.6) this.vel.set(ax, 0, az);
     }

@@ -65,7 +65,7 @@ export class Sky {
     this.group.add(this.sun.target);
 
     this.clouds = new THREE.Group();
-    const cloudMat = new THREE.MeshLambertMaterial({ color: 0xffffff, flatShading: true, emissive: 0x666666 });
+    const cloudMat = new THREE.MeshLambertMaterial({ color: 0xffffff, flatShading: true, emissive: 0xb8c4d6, fog: false });
     const geo = new THREE.IcosahedronGeometry(1, 1);
     for (let i = 0; i < 18; i++) {
       const cl = new THREE.Group();

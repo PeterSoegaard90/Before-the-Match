@@ -192,42 +192,66 @@ export function buildLandmarks(city: CityData, physics: Physics): LandmarkResult
   const thetaStart = thetaEnd - H.turns * Math.PI * 2;
   const segs = Math.round(H.turns * 40);
   const rMid = (H.rInner + H.rOuter) / 2;
-  const width = H.rOuter - H.rInner;
   const yAt = (th: number) => (H.top * (th - thetaStart)) / (thetaEnd - thetaStart);
+  // Rampen som ét sammenhængende bånd (glat trimesh – ingen kanter mellem segmenter)
+  const ramp = new GeoBuilder();
+  const th = 0.3;
+  const P = (t: number, r: number, y: number): [number, number, number] => [H.center[0] + Math.cos(t) * r, y, H.center[1] + Math.sin(t) * r];
   for (let i = 0; i < segs; i++) {
     const t0 = thetaStart + ((thetaEnd - thetaStart) * i) / segs;
     const t1 = thetaStart + ((thetaEnd - thetaStart) * (i + 1)) / segs;
-    const tm = (t0 + t1) / 2;
-    const arc = rMid * (t1 - t0);
-    const rise = yAt(t1) - yAt(t0);
-    const pitch = -Math.atan2(rise, arc);
-    const cx = H.center[0] + Math.cos(tm) * rMid, cz = H.center[1] + Math.sin(tm) * rMid;
-    const tx = -Math.sin(tm), tz = Math.cos(tm);
-    const yaw = Math.atan2(tx, tz);
-    const len = (H.rOuter * (t1 - t0)) / 2 + 0.05;
-    const cy = (yAt(t0) + yAt(t1)) / 2 - 0.15;
-    const m = new THREE.Matrix4().compose(new THREE.Vector3(cx, cy, cz), new THREE.Quaternion().setFromEuler(new THREE.Euler(pitch, yaw, 0, 'YXZ')), new THREE.Vector3(1, 1, 1));
-    flat.addGeometry(new THREE.BoxGeometry(width, 0.3, len * 2), m, concrete);
-    physics.addBox(cx, cy, cz, width / 2, 0.15, len, yaw, pitch);
+    const y0 = yAt(t0), y1 = yAt(t1);
+    const a = P(t0, H.rInner, y0), b = P(t0, H.rOuter, y0), c = P(t1, H.rOuter, y1), d = P(t1, H.rInner, y1);
+    const quad = (q: [number, number, number][], col: THREE.Color) => {
+      const n = new THREE.Vector3().crossVectors(
+        new THREE.Vector3(q[1][0] - q[0][0], q[1][1] - q[0][1], q[1][2] - q[0][2]),
+        new THREE.Vector3(q[3][0] - q[0][0], q[3][1] - q[0][1], q[3][2] - q[0][2]),
+      ).normalize();
+      const ids = q.map((v) => ramp.v(v[0], v[1], v[2], n.x, n.y, n.z, col));
+      ramp.idx.push(ids[0], ids[1], ids[2], ids[0], ids[2], ids[3]);
+    };
+    const down = (v: [number, number, number]): [number, number, number] => [v[0], v[1] - th, v[2]];
+    quad([a, d, c, b], concrete); // top (op)
+    quad([down(a), down(b), down(c), down(d)], concrete); // bund
+    quad([b, c, down(c), down(b)], curb); // yderkant
+    quad([a, down(a), down(d), d], curb); // inderkant
     // Ydermur (åbning ved ind- og udkørsel)
+    const tm = (t0 + t1) / 2;
     if (tm - thetaStart > 0.5 && thetaEnd - tm > 0.6) {
-      const wx = H.center[0] + Math.cos(tm) * (H.rOuter + 0.1), wz = H.center[1] + Math.sin(tm) * (H.rOuter + 0.1);
-      const wm = new THREE.Matrix4().compose(new THREE.Vector3(wx, cy + 0.7, wz), new THREE.Quaternion().setFromEuler(new THREE.Euler(pitch, yaw, 0, 'YXZ')), new THREE.Vector3(1, 1, 1));
-      flat.addGeometry(new THREE.BoxGeometry(0.25, 1.1, len * 2), wm, curb);
-      physics.addBox(wx, cy + 0.7, wz, 0.12, 0.55, len, yaw, pitch);
+      const wi0 = P(t0, H.rOuter + 0.05, y0), wi1 = P(t1, H.rOuter + 0.05, y1);
+      const wo0 = P(t0, H.rOuter + 0.3, y0), wo1 = P(t1, H.rOuter + 0.3, y1);
+      const up = (v: [number, number, number]): [number, number, number] => [v[0], v[1] + 1.1, v[2]];
+      quad([wi0, up(wi0), up(wi1), wi1], curb);
+      quad([wo0, wo1, up(wo1), up(wo0)], curb);
+      quad([up(wi0), up(wo0), up(wo1), up(wi1)], curb);
     }
   }
+  const rampData = ramp.colliderData();
+  physics.addTrimesh(rampData.vertices, rampData.indices);
+  addMesh(group, ramp, makeFlatMaterial({ roughness: 0.8, side: THREE.DoubleSide }), true);
   // Kerne + søjler
   flat.addGeometry(new THREE.CylinderGeometry(H.rInner - 0.1, H.rInner - 0.1, H.top + 1.2, 16), new THREE.Matrix4().setPosition(H.center[0], (H.top + 1.2) / 2, H.center[1]), color('#bdb9b0'));
   physics.addCylinder(H.center[0], (H.top + 1.2) / 2, H.center[1], (H.top + 1.2) / 2, H.rInner - 0.1);
-  // Landingsplads ved toppen mod parkeringsdækket
+  // Landingsplads: fortsætter fra rampens ende (samme højde) og ud over parkeringsdækket
   {
-    const ax = Math.cos(thetaEnd), az = Math.sin(thetaEnd);
-    const r0 = H.rInner, r1 = H.rOuter + 4;
-    const cx = H.center[0] + ax * (r0 + r1) / 2, cz = H.center[1] + az * (r0 + r1) / 2;
-    const yaw = Math.atan2(ax, az);
-    flat.box(cx, H.top - 0.15, cz, 3.6, 0.15, (r1 - r0) / 2, concrete, yaw);
-    physics.addBox(cx, H.top - 0.15, cz, 3.6, 0.15, (r1 - r0) / 2, yaw);
+    const land = new GeoBuilder();
+    const sector: V2[] = [];
+    const span = 1.0;
+    for (let k = 0; k <= 10; k++) {
+      const t = thetaEnd + (span * k) / 10;
+      sector.push([H.center[0] + Math.cos(t) * H.rInner, H.center[1] + Math.sin(t) * H.rInner]);
+    }
+    for (let k = 10; k >= 0; k--) {
+      const t = thetaEnd + (span * k) / 10;
+      sector.push([H.center[0] + Math.cos(t) * (H.rOuter + 5), H.center[1] + Math.sin(t) * (H.rOuter + 5)]);
+    }
+    const ring = signed(sector) > 0 ? sector : sector.slice().reverse();
+    land.polygon(ring, [], H.top, concrete, true);
+    land.polygon(ring, [], H.top - 0.3, concrete, false);
+    for (let i = 0; i < ring.length; i++) land.wall(ring[i], ring[(i + 1) % ring.length], H.top - 0.3, H.top, H.top - 0.3, H.top, curb);
+    const ld = land.colliderData();
+    physics.addTrimesh(ld.vertices, ld.indices);
+    addMesh(group, land, makeFlatMaterial({ roughness: 0.8 }), true);
   }
   const sx = Math.cos(thetaStart), sz = Math.sin(thetaStart);
   const helixEntrance = new THREE.Vector3(H.center[0] + sx * rMid - Math.cos(thetaStart + Math.PI / 2) * 6, 0, H.center[1] + sz * rMid - Math.sin(thetaStart + Math.PI / 2) * 6);

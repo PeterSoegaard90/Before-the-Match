@@ -4,6 +4,7 @@ import type { Building, CityData, SquareId, V2 } from '../shared/cityTypes.ts';
 import { GridIndex, bbox, distToRing, pointInShape } from '../shared/geom.ts';
 import { NavIndex } from '../shared/nav.ts';
 import type { Physics } from '../physics.ts';
+import { buildBackdrop } from './backdrop.ts';
 import { buildBuildings } from './buildings.ts';
 import { buildGround } from './ground.ts';
 import { buildLandmarks, type LandmarkResult } from './landmarks.ts';
@@ -41,11 +42,13 @@ export class World {
     this.water = new Water(city);
     scene.add(this.water.group);
     scene.add(buildBuildings(city, physics));
+    if (city.backdrop?.length) scene.add(buildBackdrop(city));
     this.landmarks = buildLandmarks(city, physics);
     scene.add(this.landmarks.group);
     this.props = buildProps(city, physics, (x, z, m) => this.insideBuilding(x, z, m), (x, z) => this.water.isWater(x, z));
     scene.add(this.props.group);
     this.addBounds();
+    this.physics.flushStatic();
 
     for (const b of city.bars) this.beerSpots.push({ pos: new THREE.Vector3(b.pos[0], b.y ?? 0, b.pos[1]), kind: 'bar', name: b.name });
     for (const p of this.props.platformBeers) this.beerSpots.push({ pos: p, kind: 'platform' });
@@ -57,10 +60,20 @@ export class World {
     const cx = (b.minX + b.maxX) / 2, cz = (b.minZ + b.maxZ) / 2;
     const hx = (b.maxX - b.minX) / 2, hz = (b.maxZ - b.minZ) / 2;
     const m = 25; // margen inden for bbox
-    this.physics.addBox(cx, 20, b.minZ + m - 1, hx, 40, 1);
-    this.physics.addBox(cx, 20, b.maxZ - m + 1, hx, 40, 1);
-    this.physics.addBox(b.minX + m - 1, 20, cz, 1, 40, hz);
-    this.physics.addBox(b.maxX - m + 1, 20, cz, 1, 40, hz);
+    // Opdelt i stykker á højst 100 m (præcision i kollisionerne)
+    const seg = (x0: number, z0: number, x1: number, z1: number) => {
+      const L = Math.hypot(x1 - x0, z1 - z0), n = Math.ceil(L / 100);
+      for (let i = 0; i < n; i++) {
+        const ax = x0 + ((x1 - x0) * (i + 0.5)) / n, az = z0 + ((z1 - z0) * (i + 0.5)) / n;
+        const hl = L / n / 2;
+        if (Math.abs(x1 - x0) > Math.abs(z1 - z0)) this.physics.addBox(ax, 20, az, hl, 40, 1);
+        else this.physics.addBox(ax, 20, az, 1, 40, hl);
+      }
+    };
+    seg(cx - hx, b.minZ + m - 1, cx + hx, b.minZ + m - 1);
+    seg(cx - hx, b.maxZ - m + 1, cx + hx, b.maxZ - m + 1);
+    seg(b.minX + m - 1, cz - hz, b.minX + m - 1, cz + hz);
+    seg(b.maxX - m + 1, cz - hz, b.maxX - m + 1, cz + hz);
   }
 
   insideBuilding(x: number, z: number, margin = 0): boolean {

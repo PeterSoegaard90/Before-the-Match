@@ -187,6 +187,13 @@ input[type='range'] { width: 100%; accent-color: var(--red); height: 24px; }
 @keyframes feedin { from { opacity: 0; transform: translateX(20px); } }
 
 .prompt { position: absolute; bottom: 36px; left: 50%; transform: translateX(-50%); background: var(--panel); padding: 10px 18px; border-radius: 999px; font-weight: 900; font-size: 18px; white-space: nowrap; }
+.hint {
+  position: absolute; bottom: 92px; left: 50%; transform: translateX(-50%); max-width: min(680px, 90vw);
+  background: rgba(10, 18, 32, 0.86); border: 2px solid rgba(255,255,255,0.2); padding: 10px 16px; border-radius: 14px;
+  font-weight: 800; font-size: 16px; line-height: 1.4; text-align: center;
+}
+.hint.show { animation: feedin 0.3s ease; }
+.hint-tag { display: inline-block; background: var(--amber); color: var(--ink); font-weight: 900; font-size: 12px; padding: 2px 8px; border-radius: 99px; margin-right: 10px; vertical-align: 2px; }
 .progress { position: absolute; bottom: 86px; left: 50%; transform: translateX(-50%); width: 220px; height: 10px; border-radius: 99px; background: rgba(255,255,255,0.2); overflow: hidden; }
 .progress i { display: block; height: 100%; background: var(--amber); width: 0; }
 

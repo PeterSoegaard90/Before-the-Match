@@ -52,6 +52,8 @@ export class Agent {
   collider: RAPIER_T.Collider | null = null;
   body: RAPIER_T.RigidBody | null = null;
   walkSpeed: number;
+  losAt = -99;
+  losOk = false;
 
   constructor(kind: AgentKind, model: Humanoid, walkSpeed: number) {
     this.kind = kind;
@@ -154,6 +156,22 @@ export class NpcManager {
       return a;
     }
     return null;
+  }
+
+  /** Flyt en fodgænger til et tilfældigt sted i en ring om spilleren. */
+  private relocatePed(a: Agent, near: THREE.Vector3, minR: number, maxR: number) {
+    const nav = this.world.nav;
+    for (let tries = 0; tries < 30; tries++) {
+      const n = Math.floor(R() * nav.nodes.length);
+      const p = nav.nodes[n];
+      const d = Math.hypot(p[0] - near.x, p[1] - near.z);
+      if (d < minR || d > maxR || nav.adj[n].length === 0) continue;
+      this.placeOnNode(a, n);
+      a.t = R() * 0.8;
+      a.setState('wander');
+      a.model.setState('walk');
+      return;
+    }
   }
 
   spawnHooligans(count: number, avoid: THREE.Vector3) {
@@ -367,18 +385,18 @@ export class NpcManager {
   // ------------------------------------------------------------ opdatering
   update(dt: number, now: number, player: { pos: THREE.Vector3; onFoot: boolean; speed: number; vehicleKind: string | null; immune: boolean }, camPos: THREE.Vector3, wantedStars: number, lastSeen: THREE.Vector3) {
     this.now = now;
-    // Fodgængere: tæthed omkring spilleren
-    for (let i = this.peds.length - 1; i >= 0; i--) {
-      const a = this.peds[i];
-      if (Math.hypot(a.pos.x - player.pos.x, a.pos.z - player.pos.z) > 175 && !a.busy) {
-        this.group.remove(a.model.group);
-        a.model.dispose();
-        this.peds.splice(i, 1);
-      }
-    }
+    // Fodgængere: fast pulje, der flyttes rundt om spilleren (ingen nye meshes/teksturer under spillet)
     let spawnBudget = 3;
     while (this.peds.length < TUNING.pedestrianCount && spawnBudget-- > 0) {
       if (!this.spawnPed(player.pos, this.peds.length < TUNING.pedestrianCount / 2 ? 15 : 70, 150)) break;
+    }
+    let relocate = 2;
+    for (const a of this.peds) {
+      if (relocate <= 0) break;
+      if (!a.busy && Math.hypot(a.pos.x - player.pos.x, a.pos.z - player.pos.z) > 175) {
+        this.relocatePed(a, player.pos, 80, 150);
+        relocate--;
+      }
     }
 
     for (const a of this.peds) this.updatePed(a, dt, player);
@@ -488,7 +506,14 @@ export class NpcManager {
     const dx = player.pos.x - a.pos.x, dz = player.pos.z - a.pos.z;
     const d = Math.hypot(dx, dz);
     const dy = Math.abs(player.pos.y - a.pos.y);
-    const canSee = d < TUNING.hooliganSight && dy < 3 && this.physics.lineOfSight(a.pos.x, a.pos.y + 1.6, a.pos.z, player.pos.x, player.pos.y + 1.4, player.pos.z);
+    let canSee = false;
+    if (d < TUNING.hooliganSight && dy < 3) {
+      if (this.now - a.losAt > 0.2) {
+        a.losAt = this.now;
+        a.losOk = this.physics.lineOfSight(a.pos.x, a.pos.y + 1.6, a.pos.z, player.pos.x, player.pos.y + 1.4, player.pos.z);
+      }
+      canSee = a.losOk;
+    }
     const members = this.hools.filter((h) => h.groupId === a.groupId);
 
     switch (a.state) {
@@ -599,7 +624,11 @@ export class NpcManager {
       if (stars === 0) { a.setState('return'); return; }
       const dx = player.pos.x - a.pos.x, dz = player.pos.z - a.pos.z;
       const d = Math.hypot(dx, dz);
-      const see = d < 35 && Math.abs(player.pos.y - a.pos.y) < 3 && this.physics.lineOfSight(a.pos.x, a.pos.y + 1.6, a.pos.z, player.pos.x, player.pos.y + 1.2, player.pos.z);
+      if (this.now - a.losAt > 0.2) {
+        a.losAt = this.now;
+        a.losOk = d < 35 && Math.abs(player.pos.y - a.pos.y) < 3 && this.physics.lineOfSight(a.pos.x, a.pos.y + 1.6, a.pos.z, player.pos.x, player.pos.y + 1.2, player.pos.z);
+      }
+      const see = a.losOk && d < 35;
       if (see) this.steer(a, player.pos.x, player.pos.z, chaseSpeed, dt);
       else this.followPath(a, lastSeen, chaseSpeed, dt);
       if (a.onBike) bikePose();

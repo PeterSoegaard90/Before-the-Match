@@ -81,7 +81,7 @@ export class MapRenderer {
   }
 
   /** Minikort centreret om spilleren, roteret så kameraets retning peger op. */
-  drawMini(cv: HTMLCanvasElement, px: number, pz: number, camYaw: number, playerYaw: number, dots: MapDot[], fanzone: { x: number; z: number } | null) {
+  drawMini(cv: HTMLCanvasElement, px: number, pz: number, camYaw: number, playerYaw: number, dots: MapDot[], fanzone: { x: number; z: number } | null, route: [number, number][] | null = null) {
     const g = cv.getContext('2d')!;
     const W = cv.width, H = cv.height;
     const scale = W / 260; // ~260 m på tværs
@@ -99,6 +99,14 @@ export class MapRenderer {
       const c = Math.cos(camYaw), s = Math.sin(camYaw);
       return [W / 2 + dx * c - dz * s, H / 2 + dx * s + dz * c];
     };
+    if (route && route.length > 1) {
+      g.save();
+      g.beginPath();
+      g.arc(W / 2, H / 2, W / 2 - 2, 0, Math.PI * 2);
+      g.clip();
+      drawRoute(g, route.map(([x, z]) => toScreen(x, z)), 5);
+      g.restore();
+    }
     for (const d of dots) {
       const [sx, sy] = toScreen(d.x, d.z);
       if (Math.hypot(sx - W / 2, sy - H / 2) > W / 2 - 6) continue;
@@ -138,11 +146,12 @@ export class MapRenderer {
   }
 
   /** Stort kort, nord op. */
-  drawBig(cv: HTMLCanvasElement, px: number, pz: number, playerYaw: number, dots: MapDot[], fanzone: { x: number; z: number } | null) {
+  drawBig(cv: HTMLCanvasElement, px: number, pz: number, playerYaw: number, dots: MapDot[], fanzone: { x: number; z: number } | null, route: [number, number][] | null = null) {
     const g = cv.getContext('2d')!;
     const k = cv.width / this.base.width;
     g.drawImage(this.base, 0, 0, cv.width, cv.height);
     const S = (x: number, z: number): [number, number] => [this.X(x) * k, this.Z(z) * k];
+    if (route && route.length > 1) drawRoute(g, route.map(([x, z]) => S(x, z)), 4);
     for (const d of dots) {
       const [sx, sy] = S(d.x, d.z);
       drawDot(g, sx, sy, d.kind, 1.2);
@@ -179,6 +188,19 @@ function drawDot(g: CanvasRenderingContext2D, x: number, y: number, kind: MapDot
   g.fill();
   g.strokeStyle = kind === 'fanzone' ? '#fff' : 'rgba(0,0,0,0.6)';
   g.lineWidth = kind === 'fanzone' ? 3 : 1.5;
+  g.stroke();
+}
+
+function drawRoute(g: CanvasRenderingContext2D, pts: [number, number][], w: number) {
+  g.lineCap = 'round';
+  g.lineJoin = 'round';
+  g.beginPath();
+  pts.forEach(([x, y], i) => (i ? g.lineTo(x, y) : g.moveTo(x, y)));
+  g.strokeStyle = 'rgba(14,27,46,0.8)';
+  g.lineWidth = w + 3;
+  g.stroke();
+  g.strokeStyle = '#2fbf71';
+  g.lineWidth = w;
   g.stroke();
 }
 

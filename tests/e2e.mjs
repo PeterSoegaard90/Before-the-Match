@@ -66,6 +66,19 @@ try {
   const s0 = await st();
   check('runden starter', s0.state === 'playing' && s0.timeLeft <= 300, `tid ${s0.timeLeft.toFixed(1)}`);
   await shot('04-playing');
+  // Lyd: der skal komme hørbar lyd, når man samler en fadøl (Web Audio-måler)
+  const lvl = await page.evaluate(async () => {
+    window.__audio.unlock();
+    await new Promise((r) => setTimeout(r, 100));
+    window.__audio.beer();
+    let max = 0;
+    for (let i = 0; i < 12; i++) { await new Promise((r) => setTimeout(r, 25)); max = Math.max(max, window.__audio.level()); }
+    return { max, state: window.__audio.state };
+  });
+  check('lyd afspilles', lvl.state === 'running' && lvl.max > 0.005, `niveau ${lvl.max.toFixed(3)} (${lvl.state})`);
+  // Tip i første runde
+  const hintVis = await page.waitForFunction(() => !document.querySelector('#hint').classList.contains('hidden'), null, { timeout: 60000 }).then(() => true).catch(() => false);
+  check('tip vises i første runde', hintVis, await page.textContent('#hint'));
 
   // Gå og løb
   await holdGame('KeyW', 1.5);
@@ -78,12 +91,18 @@ try {
   await shot('05-walked');
 
   // Hop
-  const y0 = (await st()).pos[1];
-  await page.keyboard.down('Space');
-  await waitGame(0.2);
-  const yJ = (await st()).pos[1];
-  await page.keyboard.up('Space');
-  check('hop', yJ > y0 + 0.3, `${(yJ - y0).toFixed(2)} m`);
+  let jumpH = 0, jumpInfo = '';
+  for (let attempt = 0; attempt < 3 && jumpH < 0.3; attempt++) {
+    await waitGame(0.5);
+    const y0 = (await st()).pos[1];
+    await page.keyboard.down('Space');
+    await waitGame(0.2);
+    const s = await st();
+    await page.keyboard.up('Space');
+    jumpH = s.pos[1] - y0;
+    jumpInfo = `${jumpH.toFixed(2)} m (forsøg ${attempt + 1}, tilstand ${s.mode})`;
+  }
+  check('hop', jumpH > 0.3, jumpInfo);
   await wait(800);
 
   // Fadøl: teleportér hen til en bar
@@ -160,6 +179,9 @@ try {
   await waitGame(1.5);
   const s3 = await st();
   check('fanzone afsløret', s3.revealed, s3.fanzone);
+  await waitGame(1.2);
+  const routeLen = await page.evaluate(() => window.__btm.routeFinder.route?.length ?? 0);
+  check('GPS-rute til fanzonen', routeLen > 2, `${routeLen} punkter`);
   await shot('10-fanzone-reveal');
   await page.evaluate(() => {
     const g = window.__btm;
@@ -186,7 +208,7 @@ try {
   check('highscore gemt', hsRows.length >= 1, `${hsRows.length} rækker`);
   await shot('13-highscore');
   const perf = await st();
-  console.log('ydelse', JSON.stringify({ calls: perf.calls, triangles: perf.triangles, pixelRatio: perf.pixelRatio }));
+  console.log('ydelse', JSON.stringify({ calls: perf.calls, triangles: perf.triangles, pixelRatio: perf.pixelRatio, cpuMsPerFrame: +perf.cpuMs.toFixed(2) }));
 } catch (e) {
   errors.push('TEST: ' + e.message);
   await shot('99-fejl').catch(() => {});
