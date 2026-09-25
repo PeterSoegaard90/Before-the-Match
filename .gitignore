@@ -1,0 +1,6 @@
+node_modules/
+dist/
+test-results/
+data/osm-raw.json
+*.log
+.DS_Store
